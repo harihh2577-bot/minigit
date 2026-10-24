@@ -205,22 +205,35 @@ public class MiniGit {
         return c.id;
     }
 
-    // ---------- log (HEAD-la irundhu parent parent-a nadakkum) ----------
-    static void log() throws IOException {
+    // ---------- history (NEW) ----------
+    // HEAD-la irundhu parent parent-a nadandhu, commits-a LIST-la serkkum.
+    // List-oda index 0 = latest commit, kadaisi = initial commit.
+    static List<Commit> history() throws IOException {
+        List<Commit> list = new ArrayList<>();
         String id = headId();
-        if (id.isEmpty()) { System.out.println("No commits yet."); return; }
         while (!id.isEmpty()) {
             Commit c = readCommit(id);
-            if (c == null) break;
-            System.out.println("commit " + c.id);
-            System.out.println("Date:    " + c.timestamp);
-            System.out.println("Parent:  " + (c.parent.isEmpty() ? "none" : c.parent));
+            if (c == null) break;          // commit file missing-na safe-a nillu
+            list.add(c);
+            id = c.parent;                 // adutha step: parent-ku poga
+        }
+        return list;
+    }
+
+    // ---------- log (UPDATED) ----------
+    static void log() throws IOException {
+        if (!isInitialized()) { System.out.println("Not a MiniGit repo. Run: init"); return; }
+        List<Commit> commits = history();
+        if (commits.isEmpty()) {
+            System.out.println("No commits yet.");
+            return;
+        }
+        for (Commit c : commits) {
+            System.out.println("Commit:  " + c.id);
             System.out.println("Message: " + c.message);
-            for (Map.Entry<String, String> e : c.files.entrySet()) {
-                System.out.println("    " + e.getKey() + "  " + e.getValue().substring(0, 12));
-            }
+            System.out.println("Date:    " + c.timestamp);
+            System.out.println("Parent:  " + (c.parent.isEmpty() ? "None" : c.parent));
             System.out.println();
-            id = c.parent;
         }
     }
 
@@ -260,6 +273,10 @@ public class MiniGit {
         Files.writeString(root.resolve("a.txt"), "hello");
         Files.writeString(root.resolve("b.txt"), "world");
 
+        System.out.println("\n--- Test 0: no commits yet ---");
+        check(history().isEmpty(), "no commits -> history is empty");
+        log();   // "No commits yet." varanum
+
         System.out.println("\n--- Test 1: nothing staged ---");
         check(commit("Empty") == null, "commit without staging returns nothing-to-commit");
 
@@ -277,10 +294,17 @@ public class MiniGit {
         check(sha256(c1.body()).equals(id1), "commit ID matches SHA-256 of its content");
         check(headId().equals(id1), "HEAD points to commit 1");
 
-        System.out.println("\n--- Test 3: same snapshot again ---");
-        check(commit("Again") == null, "no new changes -> nothing to commit");
+        System.out.println("\n--- Test 3: log with only one commit ---");
+        check(history().size() == 1, "history has exactly 1 commit");
+        check(history().get(0).id.equals(id1), "that commit is the initial commit");
+        check(history().get(0).parent.isEmpty(), "initial commit shows no parent");
+        log();
 
-        System.out.println("\n--- Test 4: second commit ---");
+        System.out.println("--- Test 4: same snapshot again ---");
+        check(commit("Again") == null, "no new changes -> nothing to commit");
+        check(history().size() == 1, "history still 1 commit");
+
+        System.out.println("\n--- Test 5: second commit ---");
         Files.writeString(root.resolve("c.txt"), "new file");
         add("c.txt");
         Map<String, String> blobsBefore2 = snapshotObjects();
@@ -290,11 +314,36 @@ public class MiniGit {
         check(headId().equals(id2), "HEAD points to commit 2");
         check(snapshotObjects().equals(blobsBefore2), "blobs not modified by commit 2");
 
-        System.out.println("\n--- Test 5: old commits still accessible ---");
-        Commit again1 = readCommit(id1);
-        check(again1 != null && again1.files.size() == 2, "commit 1 still readable, snapshot intact");
+        // Pazhaya commit files-oda text-a save pannikkirom (apram compare panna)
+        String text1 = Files.readString(commitsDir().resolve(id1));
+        String text2 = Files.readString(commitsDir().resolve(id2));
 
-        System.out.println("\nAll " + passed + " checks passed.");
+        System.out.println("\n--- Test 6: multiple commits, order + parents ---");
+        Files.writeString(root.resolve("a.txt"), "hello v2");
+        add("a.txt");
+        String id3 = commit("Update a.txt");
+        check(id3 != null, "third commit created");
+
+        List<Commit> h = history();
+        check(h.size() == 3, "history has 3 commits");
+        check(h.get(0).id.equals(id3), "position 0 = latest commit (id3)");
+        check(h.get(1).id.equals(id2), "position 1 = id2");
+        check(h.get(2).id.equals(id1), "position 2 = initial commit (id1)");
+        check(h.get(0).parent.equals(id2), "commit 3 parent = commit 2");
+        check(h.get(1).parent.equals(id1), "commit 2 parent = commit 1");
+        check(h.get(2).parent.isEmpty(), "commit 1 has no parent");
+
+        System.out.println("\n--- Test 7: old commits not changed ---");
+        check(Files.readString(commitsDir().resolve(id1)).equals(text1), "commit 1 file unchanged");
+        check(Files.readString(commitsDir().resolve(id2)).equals(text2), "commit 2 file unchanged");
+        try (Stream<Path> s = Files.list(commitsDir())) {
+            check(s.count() == 3, "3 commit files exist (nothing deleted)");
+        }
+
+        System.out.println("\n--- Full log output ---");
+        log();
+
+        System.out.println("All " + passed + " checks passed.");
     }
 
     // ---------- main ----------

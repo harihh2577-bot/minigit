@@ -1,6 +1,8 @@
-.minigit/
+target/
 *.class
+demo/
+.minigit/
 test.txt
 test2.txt
-*.class
-.minigit/
+test3.txt
+.vscode/
